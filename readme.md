@@ -377,6 +377,7 @@ If we don't support your language, please consider contributing! You can find mo
 | `include_all_commits` | Count total commits instead of just the current year commits. | boolean | `false` |
 | `line_height` | Sets the line height between text. | integer | `25` |
 | `exclude_repo` | Excludes specified repositories. | string (comma-separated values) | `null` |
+| `orgs` | Includes public repositories from the specified organizations and deduplicates them by repository ID. | string (comma-separated values) | `null` |
 | `custom_title` | Sets a custom title for the card. | string | `<username> GitHub Stats` |
 | `text_bold` | Uses bold text. | boolean | `true` |
 | `disable_animations` | Disables all animations in the card. | boolean | `false` |
@@ -672,6 +673,10 @@ Change the `?username=` value to your [WakaTime](https://wakatime.com) username.
 *   Include All Commits
 
 ![Anurag's GitHub stats](https://github-readme-stats.vercel.app/api?username=anuraghazra\&include_all_commits=true)
+
+*   Include Public Organization Repositories
+
+![Anurag's GitHub stats](https://github-readme-stats.vercel.app/api?username=anuraghazra\&orgs=github)
 
 *   Themes
 

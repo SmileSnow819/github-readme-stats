@@ -75,6 +75,46 @@ const data_repo_zero_stars = {
   },
 };
 
+const data_org = {
+  data: {
+    organization: {
+      repositories: {
+        nodes: [
+          { id: "org-1", name: "org-repo", stargazers: { totalCount: 40 } },
+          {
+            id: "shared-1",
+            name: "shared-repo",
+            stargazers: { totalCount: 20 },
+          },
+        ],
+        pageInfo: {
+          hasNextPage: false,
+          endCursor: null,
+        },
+      },
+    },
+  },
+};
+
+const data_stats_with_ids = {
+  data: {
+    user: {
+      ...data_stats.data.user,
+      repositories: {
+        ...data_stats.data.user.repositories,
+        nodes: [
+          {
+            id: "shared-1",
+            name: "shared-repo",
+            stargazers: { totalCount: 100 },
+          },
+          ...data_stats.data.user.repositories.nodes.slice(1),
+        ],
+      },
+    },
+  },
+};
+
 const error = {
   errors: [
     {
@@ -91,9 +131,18 @@ const mock = new MockAdapter(axios);
 beforeEach(() => {
   process.env.FETCH_MULTI_PAGE_STARS = "false"; // Set to `false` to fetch only one page of stars.
   mock.onPost("https://api.github.com/graphql").reply((cfg) => {
+    const body = JSON.parse(cfg.data);
+    const query = body.query;
+    if (query.includes("organizationInfo")) {
+      return [200, data_org];
+    }
     return [
       200,
-      cfg.data.includes("contributionsCollection") ? data_stats : data_repo,
+      query.includes("query userInfo") && body.variables.after === null
+        ? body.variables.login === "org-test-user"
+          ? data_stats_with_ids
+          : data_stats
+        : data_repo,
     ];
   });
 });
@@ -103,6 +152,19 @@ afterEach(() => {
 });
 
 describe("Test fetchStats", () => {
+  it("should include public organization stars and deduplicate repositories", async () => {
+    const stats = await fetchStats(
+      "org-test-user",
+      false,
+      [],
+      false,
+      false,
+      false,
+      ["longlian-online"],
+    );
+    expect(stats.totalStars).toBe(340);
+  });
+
   it("should fetch correct stats", async () => {
     let stats = await fetchStats("anuraghazra");
     const rank = calculateRank({

@@ -19,6 +19,7 @@ const GRAPHQL_REPOS_FIELD = `
   repositories(first: 100, ownerAffiliations: OWNER, orderBy: {direction: DESC, field: STARGAZERS}, after: $after) {
     totalCount
     nodes {
+      id
       name
       stargazers {
         totalCount
@@ -27,6 +28,26 @@ const GRAPHQL_REPOS_FIELD = `
     pageInfo {
       hasNextPage
       endCursor
+    }
+  }
+`;
+
+const GRAPHQL_ORG_REPOS_QUERY = `
+  query organizationInfo($login: String!, $after: String) {
+    organization(login: $login) {
+      repositories(first: 100, privacy: PUBLIC, orderBy: {direction: DESC, field: STARGAZERS}, after: $after) {
+        nodes {
+          id
+          name
+          stargazers {
+            totalCount
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
     }
   }
 `;
@@ -99,6 +120,48 @@ const fetcher = (variables, token) => {
       Authorization: `bearer ${token}`,
     },
   );
+};
+
+const organizationFetcher = (variables, token) => {
+  return request(
+    { query: GRAPHQL_ORG_REPOS_QUERY, variables },
+    { Authorization: `bearer ${token}` },
+  );
+};
+
+const fetchOrganizationRepos = async (organization) => {
+  const repositories = [];
+  let hasNextPage = true;
+  let endCursor = null;
+
+  while (hasNextPage) {
+    const res = await retryer(organizationFetcher, {
+      login: organization,
+      after: endCursor,
+    });
+
+    if (res.data.errors) {
+      logger.error(res.data.errors);
+      return repositories;
+    }
+
+    const connection = res.data.data.organization?.repositories;
+    if (!connection) {
+      return repositories;
+    }
+
+    repositories.push(...connection.nodes);
+    const repoNodesWithStars = connection.nodes.filter(
+      (node) => node.stargazers.totalCount !== 0,
+    );
+    hasNextPage =
+      process.env.FETCH_MULTI_PAGE_STARS === "true" &&
+      connection.nodes.length === repoNodesWithStars.length &&
+      connection.pageInfo.hasNextPage;
+    endCursor = connection.pageInfo.endCursor;
+  }
+
+  return repositories;
 };
 
 /**
@@ -217,6 +280,7 @@ const totalCommitsFetcher = async (username) => {
  * @param {boolean} include_merged_pull_requests Include merged pull requests.
  * @param {boolean} include_discussions Include discussions.
  * @param {boolean} include_discussions_answers Include discussions answers.
+ * @param {string[]} organizations Public organizations to include.
  * @returns {Promise<StatsData>} Stats data.
  */
 const fetchStats = async (
@@ -226,6 +290,7 @@ const fetchStats = async (
   include_merged_pull_requests = false,
   include_discussions = false,
   include_discussions_answers = false,
+  organizations = [],
 ) => {
   if (!username) {
     throw new MissingParamError(["username"]);
@@ -303,10 +368,31 @@ const fetchStats = async (
   }
   stats.contributedTo = user.repositoriesContributedTo.totalCount;
 
-  // Retrieve stars while filtering out repositories to be hidden.
-  let repoToHide = new Set(exclude_repo);
+  // Retrieve stars while filtering out repositories to be hidden. Include
+  // optional public organization repositories and deduplicate by GitHub id.
+  const allRepos = user.repositories.nodes.map((repo) => ({
+    ...repo,
+    _dedupeKey: repo.id || `user:${repo.name}`,
+  }));
+  for (const organization of organizations) {
+    const organizationRepos = await fetchOrganizationRepos(organization);
+    allRepos.push(
+      ...organizationRepos.map((repo) => ({
+        ...repo,
+        _dedupeKey: repo.id || `org:${organization}:${repo.name}`,
+      })),
+    );
+  }
+  const uniqueReposById = new Map();
+  for (const repo of allRepos) {
+    if (!uniqueReposById.has(repo._dedupeKey)) {
+      uniqueReposById.set(repo._dedupeKey, repo);
+    }
+  }
+  const uniqueRepos = [...uniqueReposById.values()];
+  const repoToHide = new Set(exclude_repo);
 
-  stats.totalStars = user.repositories.nodes
+  stats.totalStars = uniqueRepos
     .filter((data) => {
       return !repoToHide.has(data.name);
     })
